@@ -1,0 +1,132 @@
+# Target statistics prompt baseline
+
+## Scope and data flow
+
+This independent CPU tool reads a list of `{source, target, prompt, ...}` records,
+loads each **target** MATLAB 7.3 image, computes descriptive statistics, and writes
+a new list with updated `prompt` and `image_attributes`. Other fields and record
+order are preserved. It does not load echo inputs, SARMAE, model weights, or an LLM.
+These are target-derived training annotations; generation from echo at inference
+is outside this baseline. Downstream consumption of JSON prompts is not yet verified.
+
+The confirmed data root is
+`/data/dyn/capella/output/dataset_hkk_pfa_512`. Dataset `pfa_patch` is a
+`512x512` compound array with float32 `real` and `imag` fields. Read amplitude
+as `hypot(real, imag)` in float64. The original files are opened read-only.
+The CLI accepts another HDF5 dataset path via `--mat-key`.
+
+## Coordinate convention
+
+Default: preserve the HDF5 array exactly, with row zero at the top and column
+zero at the left. These labels are **image-array positions**, not geographic
+directions. Orientation relative to the unavailable downstream loader remains
+unverified. Optional transforms run in this order: `--transpose`,
+`--flip-vertical`, `--flip-horizontal`. All transforms and the stored shape are
+recorded in `image_attributes.orientation`; previews use the same orientation.
+
+## Attributes and initial rules
+
+Let `A = abs(z)` and `U = A/max(A)` for a nonzero image. Use `P = U**2` for
+relative power fractions; these match fractions from `A**2` and are not calibrated
+backscatter or physical radiometry. Global positive gain does not change the
+relative attributes or prompt. Raw amplitude quantiles and peak are also retained.
+
+| Attribute | Definition | Initial wording cutoffs |
+|---|---|---|
+| Contrast | `(p90(U)-p10(U))/(p90(U)+p10(U))`; zero if denominator is zero | Low `<0.25`, high `>=0.60`, otherwise moderate |
+| Spatial distribution | Split rows/columns into 3 nearly equal groups; sum `P` in each cell and divide by total | Name the largest cell only if its share is `>=0.20` and `>=1.25` times the runner-up; its power per pixel must also exceed every other cell by that ratio |
+| Concentration | Power in exactly `ceil(0.01*N)` brightest pixels divided by total power | Low `<0.10`, high `>=0.25`, otherwise moderate |
+| Local variation | Clip `(U-p01)/(p99-p01)` to `[0,1]`; average mean absolute adjacent differences along both axes | Low `<0.05`, high `>=0.15`, otherwise moderate |
+
+If `p99 == p01`, use `U` for local variation. Percentile contrast describes the
+central amplitude distribution: a sparse bright outlier can coexist with low
+central contrast. Spatial dominance and pixel concentration are separate measures.
+Tied regions are not arbitrarily named. Uniform images have no dominant region;
+zero images receive an explicit zero-amplitude prompt. Non-finite, negative,
+non-2-D, or smaller-than-3x3 amplitude inputs are rejected.
+
+All cutoffs are **uncalibrated initial rules**, not established SAR thresholds.
+They are exposed as CLI options and recorded per sample under `rules`.
+Gradient statistics describe local variation, not object classes, texture causes,
+or physical speckle parameters. No directional-structure claims are generated.
+
+## Run on the Linux server
+
+Run these commands from the server repository checkout, not the local Windows machine.
+First synchronize the `main` branch and inspect the commit being tested:
+
+```bash
+git pull --ff-only origin main
+git rev-parse HEAD
+conda activate my_py310
+python -m pip install -r requirements-target-statistics.txt
+python -m pip check
+python -m unittest discover -s tests -v
+python tools/target_statistics.py --help
+```
+
+If this is the first server checkout, clone the user's repository first:
+
+```bash
+git clone git@github.com:allforkarina/SAEMAE-ItoP.git
+cd SAEMAE-ItoP
+```
+
+The dependency file matches the confirmed server versions: NumPy 2.2.6,
+h5py 3.16.0, and Pillow 12.0.0. SciPy is not used for these MATLAB 7.3 files.
+No GPU or PyTorch dependency is needed for this baseline.
+
+### Pilot: first 12 records
+
+Replace `/path/to/pairs.json` with the actual manifest. `--limit` takes the first
+N records, not a random or representative sample. Choose diverse records for
+subsequent review if the manifest starts with adjacent overlapping patches.
+
+```bash
+python tools/target_statistics.py \
+  --input-json /path/to/pairs.json \
+  --data-root /data/dyn/capella/output/dataset_hkk_pfa_512 \
+  --output-json /data/dyn/capella/output/target_stats_pilot_v1.json \
+  --limit 12 \
+  --preview-dir /data/dyn/capella/output/target_stats_previews_v1
+```
+
+The pilot JSON contains only the selected records. Each PNG shows the relative
+amplitude in `[-60,0]` dB, grid-cell power shares, and the generated prompt. The
+statistics themselves use linear amplitude/power, not the display transform.
+
+### Full manifest: after pilot review
+
+```bash
+python tools/target_statistics.py \
+  --input-json /path/to/pairs.json \
+  --data-root /data/dyn/capella/output/dataset_hkk_pfa_512 \
+  --output-json /data/dyn/capella/output/target_stats_full_v1.json
+```
+
+Input and existing output JSON files are never overwritten. Read/schema failures
+stop the run with the record index and target path; failed samples are not replaced
+or silently dropped. No output JSON is opened until all selected records have
+been processed and serialized. Interruption during the final disk write can
+still leave an incomplete new file; inspect/remove that output before rerunning.
+Previews already written before a failure remain available for inspection.
+The manifest and output records are held in memory; MAT images are read one at a time.
+
+## Validation and user calibration
+
+Synthetic server tests cover isolated/tied scatterers, uniform and zero images,
+gain invariance, local variation, compound complex reading, explicit orientation,
+JSON preservation, preview creation, and bad-input failures. They do not establish
+that the cutoffs are suitable for the real dataset or that prompts improve reconstruction.
+
+For the pilot, check count/order, unchanged source/target values, plausible grid
+shares summing to one for nonzero images, and agreement between each prompt and
+its displayed target. Compare several smooth, dense, and concentrated samples.
+As a hands-on calibration step, change one cutoff using a CLI option, for example
+`--dominant-min-share 0.30`, write to a new output path, and inspect which regional
+claims disappear and why. The ratio-to-runner-up rule still applies.
+
+Status: implementation prepared; local execution and tests intentionally not run.
+Server synthetic tests, real-image visual review, user calibration, and downstream
+effect evaluation are pending. Synchronization to GitHub is a code handoff, not
+evidence that the server or model has passed validation.

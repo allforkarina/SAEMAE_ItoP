@@ -27,6 +27,14 @@ Wei Cui<sup>1 †</sup>, Jing Zhang<sup>2,4 †</sup>.
 <a href="https://huggingface.co/Wenquandan777/SARMAE"><img src="https://img.shields.io/badge/Pretrain Weight-Hugging%20face-yellow"></a>
 </p>
 
+## Target statistics prompt baseline
+
+An independent offline tool generates per-sample English prompts and numerical
+attributes from MATLAB 7.3 `pfa_patch` target images. It preserves `source` and
+`target` paths and writes a new JSON manifest. This baseline uses image statistics
+and does not use SARMAE features. See [the baseline guide](docs/target_statistics_baseline.md)
+for attribute definitions, preview generation, and Linux-server validation commands.
+
 ## 🔥 Update
 
 **2026.4.16**
