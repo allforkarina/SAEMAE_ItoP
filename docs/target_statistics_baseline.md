@@ -68,8 +68,8 @@ python tools/target_statistics.py --help
 If this is the first server checkout, clone the user's repository first:
 
 ```bash
-git clone git@github.com:allforkarina/SAEMAE-ItoP.git
-cd SAEMAE-ItoP
+git clone git@github.com:allforkarina/SAEMAE_ItoP.git
+cd SAEMAE_ItoP
 ```
 
 The dependency file matches the confirmed server versions: NumPy 2.2.6,

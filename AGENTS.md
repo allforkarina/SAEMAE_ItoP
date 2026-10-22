@@ -16,7 +16,7 @@
 3. Provide the branch, commit hash, and server commands. The user synchronizes the server checkout through GitHub, then runs validation in `my_py310`. Use `git pull --ff-only` on the matching branch and `git rev-parse HEAD` to identify the revision being tested.
 4. Review the user's server output, adjust locally, and repeat the commit/push/pull cycle. A successful push means GitHub synchronization only; server synchronization and validation require their own evidence. Label unexecuted checks as pending.
 
-The current local branch is `main`; `origin` points to the user's confirmed GitHub repository, `git@github.com:allforkarina/SAEMAE-ItoP.git`. Use this repository for commit/push synchronization. The original source repository is `git@github.com:MiliLab/SARMAE.git`. The server checkout path remains unconfirmed; use the actual server location when providing synchronization commands.
+The current local branch is `main`; `origin` points to the user's confirmed GitHub repository, `git@github.com:allforkarina/SAEMAE_ItoP.git` (renamed from `SAEMAE-ItoP`). Use this repository for commit/push synchronization. The original source repository is `git@github.com:MiliLab/SARMAE.git`. The server checkout path remains unconfirmed; a new clone under `/data/dyn` defaults to `/data/dyn/SAEMAE_ItoP`. Use the actual server location when providing synchronization commands.
 
 ## Server Configuration Reference
 
