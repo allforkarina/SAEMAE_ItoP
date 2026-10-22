@@ -8,6 +8,7 @@
 - `Figs/`: README illustrations.
 - `tools/target_statistics.py`: independent MATLAB 7.3 target-statistics prompt baseline; see `docs/target_statistics_baseline.md` for formulas and server commands.
 - `tests/test_target_statistics.py`: synthetic baseline tests using standard-library `unittest`; run on the server only.
+- `run/`: Bash entry points for dependency setup, tests, pilot previews, and full JSON generation. `outputs/` holds generated artifacts and is ignored by Git.
 
 ## Local–GitHub–Server Workflow
 
@@ -19,6 +20,8 @@
 The current local branch is `main`; `origin` points to the user's confirmed GitHub repository, `git@github.com:allforkarina/SARMAE_ItoP.git`. Use this repository for commit/push synchronization. The original source repository is `git@github.com:MiliLab/SARMAE.git`. The server checkout path remains unconfirmed; a new clone under `/data/dyn` defaults to `/data/dyn/SARMAE_ItoP`. Use the actual server location when providing synchronization commands.
 
 The server's dedicated SSH key is `/data/dyn/.ssh/id_ed25519_sarmae`. Use it explicitly for cloning and configure `core.sshCommand` locally in the server checkout for subsequent Git operations; do not change global SSH settings or commit key material.
+
+The baseline pairs same-named `.mat` files directly under `/data/dyn/capella/output/dataset_hkk_pfa_512/echo_5_new` and `image_5_new`. It computes prompts from targets and writes project-local `outputs/dataset_pair.json`, retaining data-root-relative source/target paths. Existing manifests remain an optional input.
 
 ## Server Configuration Reference
 
@@ -69,9 +72,11 @@ python main_finetune.py --help
 For the independent statistics baseline, run on the server from the repository root:
 
 ```bash
-python -m pip install -r requirements-target-statistics.txt
-python -m unittest discover -s tests -v
-python tools/target_statistics.py --help
+bash run/01_setup.sh
+bash run/02_test.sh
+bash run/03_pilot.sh
+# After reviewing the pilot:
+bash run/04_generate_dataset.sh
 ```
 
 ## Coding Style & Naming Conventions

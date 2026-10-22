@@ -2,10 +2,10 @@
 
 ## Scope and data flow
 
-This independent CPU tool reads a list of `{source, target, prompt, ...}` records,
-loads each **target** MATLAB 7.3 image, computes descriptive statistics, and writes
-a new list with updated `prompt` and `image_attributes`. Other fields and record
-order are preserved. It does not load echo inputs, SARMAE, model weights, or an LLM.
+This independent CPU tool pairs echo and image files, loads each **target** MATLAB
+7.3 image, computes descriptive statistics, and writes one `prompt` and
+`image_attributes` entry per pair to the project file `outputs/dataset_pair.json`.
+It does not load echo contents, SARMAE, model weights, or an LLM.
 These are target-derived training annotations; generation from echo at inference
 is outside this baseline. Downstream consumption of JSON prompts is not yet verified.
 
@@ -14,6 +14,22 @@ The confirmed data root is
 `512x512` compound array with float32 `real` and `imag` fields. Read amplitude
 as `hypot(real, imag)` in float64. The original files are opened read-only.
 The CLI accepts another HDF5 dataset path via `--mat-key`.
+
+Default directories:
+
+- Echo: `/data/dyn/capella/output/dataset_hkk_pfa_512/echo_5_new`
+- Image: `/data/dyn/capella/output/dataset_hkk_pfa_512/image_5_new`
+
+Pair direct-child `*.mat` files by exact filename, then sort by filename. Missing
+counterparts on either side stop the run with counts and example names, even for
+a pilot. Nested directories are not scanned. JSON paths remain relative to the
+data root, for example `echo_5_new/x_+00550_y_-00250.mat` and
+`image_5_new/x_+00550_y_-00250.mat`. Both directories must be inside the data root.
+Override them with `--data-root`, `--echo-dir`, and `--image-dir` if needed.
+
+Existing manifests remain supported through `--input-json`; that mode preserves
+all other fields and the original record order. It cannot be combined with
+`--echo-dir` or `--image-dir`. No input JSON is needed for the default workflow.
 
 ## Coordinate convention
 
@@ -59,10 +75,8 @@ First synchronize the `main` branch and inspect the commit being tested:
 git pull --ff-only origin main
 git rev-parse HEAD
 conda activate my_py310
-python -m pip install -r requirements-target-statistics.txt
-python -m pip check
-python -m unittest discover -s tests -v
-python tools/target_statistics.py --help
+bash run/01_setup.sh
+bash run/02_test.sh
 ```
 
 If this is the first server checkout, clone the user's repository first:
@@ -79,34 +93,36 @@ git config --local core.sshCommand \
 The dependency file matches the confirmed server versions: NumPy 2.2.6,
 h5py 3.16.0, and Pillow 12.0.0. SciPy is not used for these MATLAB 7.3 files.
 No GPU or PyTorch dependency is needed for this baseline.
+The scripts locate the project root themselves, so they can also be invoked by
+absolute path from another working directory. They use the active `python`;
+set `PYTHON_BIN=/home/dyn/.conda/envs/my_py310/bin/python` to select it explicitly.
 
-### Pilot: first 12 records
+### Pilot: first 12 pairs
 
-Replace `/path/to/pairs.json` with the actual manifest. `--limit` takes the first
-N records, not a random or representative sample. Choose diverse records for
-subsequent review if the manifest starts with adjacent overlapping patches.
-
-```bash
-python tools/target_statistics.py \
-  --input-json /path/to/pairs.json \
-  --data-root /data/dyn/capella/output/dataset_hkk_pfa_512 \
-  --output-json /data/dyn/capella/output/target_stats_pilot_v1.json \
-  --limit 12 \
-  --preview-dir /data/dyn/capella/output/target_stats_previews_v1
-```
-
-The pilot JSON contains only the selected records. Each PNG shows the relative
-amplitude in `[-60,0]` dB, grid-cell power shares, and the generated prompt. The
-statistics themselves use linear amplitude/power, not the display transform.
-
-### Full manifest: after pilot review
+`--limit` takes the first N sorted pairs, not a random or representative sample.
+Choose diverse records for subsequent review if these are adjacent patches.
 
 ```bash
-python tools/target_statistics.py \
-  --input-json /path/to/pairs.json \
-  --data-root /data/dyn/capella/output/dataset_hkk_pfa_512 \
-  --output-json /data/dyn/capella/output/target_stats_full_v1.json
+bash run/03_pilot.sh
 ```
+
+The pilot writes `outputs/dataset_pair_pilot.json` and PNGs under
+`outputs/previews/`. It contains only the selected pairs. Each PNG shows relative
+amplitude in `[-60,0]` dB, grid-cell power shares, and the generated prompt.
+Statistics use linear amplitude/power, not the display transform.
+
+### Full dataset: after pilot review
+
+```bash
+bash run/04_generate_dataset.sh
+```
+
+This writes all pairs to **`outputs/dataset_pair.json`**. The project `outputs/`
+directory is ignored by Git. Additional CLI options can be appended to either
+generation script, for example `bash run/03_pilot.sh --limit 24` or
+`bash run/04_generate_dataset.sh --output-json /tmp/dataset_pair_v2.json`.
+Direct invocation `python tools/target_statistics.py` uses the same full-dataset
+defaults. For an existing manifest, use `--input-json /path/to/pairs.json`.
 
 Input and existing output JSON files are never overwritten. Read/schema failures
 stop the run with the record index and target path; failed samples are not replaced
@@ -114,13 +130,15 @@ or silently dropped. No output JSON is opened until all selected records have
 been processed and serialized. Interruption during the final disk write can
 still leave an incomplete new file; inspect/remove that output before rerunning.
 Previews already written before a failure remain available for inspection.
-The manifest and output records are held in memory; MAT images are read one at a time.
+Pair lists and output records are held in memory; MAT images are read one at a time.
 
 ## Validation and user calibration
 
 Synthetic server tests cover isolated/tied scatterers, uniform and zero images,
 gain invariance, local variation, compound complex reading, explicit orientation,
-JSON preservation, preview creation, and bad-input failures. They do not establish
+JSON preservation, preview creation, directory pairing, CLI execution, unmatched
+file reporting, and bad-input failures. `run/02_test.sh` also checks Bash syntax
+for all run scripts. These checks do not establish
 that the cutoffs are suitable for the real dataset or that prompts improve reconstruction.
 
 For the pilot, check count/order, unchanged source/target values, plausible grid

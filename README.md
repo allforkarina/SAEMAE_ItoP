@@ -30,8 +30,10 @@ Wei Cui<sup>1 †</sup>, Jing Zhang<sup>2,4 †</sup>.
 ## Target statistics prompt baseline
 
 An independent offline tool generates per-sample English prompts and numerical
-attributes from MATLAB 7.3 `pfa_patch` target images. It preserves `source` and
-`target` paths and writes a new JSON manifest. This baseline uses image statistics
+attributes from MATLAB 7.3 `pfa_patch` target images. It pairs same-named files in
+`echo_5_new/` and `image_5_new/` and writes `outputs/dataset_pair.json` with
+`source`, `target`, `prompt`, and `image_attributes`. Run scripts are in `run/`.
+This baseline uses image statistics
 and does not use SARMAE features. See [the baseline guide](docs/target_statistics_baseline.md)
 for attribute definitions, preview generation, and Linux-server validation commands.
 

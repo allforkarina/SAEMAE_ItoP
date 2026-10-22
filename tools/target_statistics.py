@@ -12,6 +12,11 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DATA_ROOT = Path("/data/dyn/capella/output/dataset_hkk_pfa_512")
+DEFAULT_OUTPUT_JSON = PROJECT_ROOT / "outputs" / "dataset_pair.json"
+
+
 REGIONS = (
     "upper_left", "upper_center", "upper_right",
     "middle_left", "center", "middle_right",
@@ -243,14 +248,48 @@ def save_preview(amplitude, attributes, prompt, path):
     canvas.save(path)
 
 
-def generate_dataset(input_json, data_root, output_json, rules=None, mat_key="pfa_patch",
+def build_pairs(echo_dir, image_dir, data_root):
+    """Pair direct-child .mat files by exact filename in deterministic order."""
+    echo_dir, image_dir, data_root = (
+        Path(path).resolve() for path in (echo_dir, image_dir, data_root)
+    )
+    for directory in (echo_dir, image_dir):
+        if not directory.is_dir():
+            raise ValueError(f"Data directory does not exist: {directory}")
+    sources = {path.name: path for path in echo_dir.glob("*.mat") if path.is_file()}
+    targets = {path.name: path for path in image_dir.glob("*.mat") if path.is_file()}
+    missing_images = sorted(sources.keys() - targets.keys())
+    missing_echoes = sorted(targets.keys() - sources.keys())
+    if missing_images or missing_echoes:
+        raise ValueError(
+            "Unmatched .mat files: "
+            f"missing images={len(missing_images)} {missing_images[:5]}; "
+            f"missing echoes={len(missing_echoes)} {missing_echoes[:5]}"
+        )
+    if not sources:
+        raise ValueError("No matching .mat pairs found in the specified directories")
+    return [
+        {
+            "source": sources[name].relative_to(data_root).as_posix(),
+            "target": targets[name].relative_to(data_root).as_posix(),
+        }
+        for name in sorted(sources)
+    ]
+
+
+def generate_dataset(input_json=None, data_root=DEFAULT_DATA_ROOT,
+                     output_json=DEFAULT_OUTPUT_JSON, rules=None, mat_key="pfa_patch",
                      limit=None, preview_dir=None, preview_count=12, transpose=False,
-                     flip_vertical=False, flip_horizontal=False):
+                     flip_vertical=False, flip_horizontal=False, echo_dir=None,
+                     image_dir=None):
     """Preserve records and order. Errors stop the run; no placeholder samples."""
     rules = rules or Rules()
     rules.validate()
-    input_json, data_root, output_json = map(Path, (input_json, data_root, output_json))
-    if output_json.resolve() == input_json.resolve():
+    data_root, output_json = Path(data_root), Path(output_json)
+    input_json = Path(input_json) if input_json is not None else None
+    if input_json is not None and (echo_dir is not None or image_dir is not None):
+        raise ValueError("Use either input_json or echo/image directories, not both")
+    if input_json is not None and output_json.resolve() == input_json.resolve():
         raise ValueError("Output must differ from the original input JSON")
     if output_json.exists():
         raise FileExistsError(f"Refusing to overwrite {output_json}")
@@ -258,8 +297,16 @@ def generate_dataset(input_json, data_root, output_json, rules=None, mat_key="pf
         raise ValueError("limit must be positive")
     if preview_count < 0:
         raise ValueError("preview_count must be nonnegative")
-    with input_json.open(encoding="utf-8") as handle:
-        records = json.load(handle)
+    if input_json is not None:
+        with input_json.open(encoding="utf-8") as handle:
+            records = json.load(handle)
+    else:
+        records = build_pairs(
+            echo_dir if echo_dir is not None else data_root / "echo_5_new",
+            image_dir if image_dir is not None else data_root / "image_5_new",
+            data_root,
+        )
+        print(f"Matched {len(records)} echo/image pairs", file=sys.stderr)
     if not isinstance(records, list) or not records:
         raise ValueError("Input JSON must contain a nonempty list of data pairs")
     selected = records if limit is None else records[:limit]
@@ -302,9 +349,11 @@ def generate_dataset(input_json, data_root, output_json, rules=None, mat_key="pf
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input-json", type=Path, required=True)
-    parser.add_argument("--data-root", type=Path, required=True)
-    parser.add_argument("--output-json", type=Path, required=True)
+    parser.add_argument("--input-json", type=Path, help="Optional existing manifest; otherwise pair directories")
+    parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
+    parser.add_argument("--echo-dir", type=Path, help="Default: DATA_ROOT/echo_5_new")
+    parser.add_argument("--image-dir", type=Path, help="Default: DATA_ROOT/image_5_new")
+    parser.add_argument("--output-json", type=Path, default=DEFAULT_OUTPUT_JSON)
     parser.add_argument("--mat-key", default="pfa_patch")
     parser.add_argument("--limit", type=int, help="Process only the first N records; writes a subset JSON")
     parser.add_argument("--preview-dir", type=Path)

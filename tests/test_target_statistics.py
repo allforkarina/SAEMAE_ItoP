@@ -2,6 +2,8 @@
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -9,7 +11,7 @@ import h5py
 import numpy as np
 
 from tools.target_statistics import (
-    Rules, compute_attributes, generate_dataset, load_amplitude, make_prompt,
+    Rules, build_pairs, compute_attributes, generate_dataset, load_amplitude, make_prompt,
 )
 
 
@@ -159,6 +161,79 @@ class DatasetTests(unittest.TestCase):
         generate_dataset(self.manifest, self.root, output, limit=2)
         results = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual([row["sample_id"] for row in results], [0, 1])
+
+
+class DirectoryPairTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.echo_dir = self.root / "echo_5_new"
+        self.image_dir = self.root / "image_5_new"
+        self.echo_dir.mkdir()
+        self.image_dir.mkdir()
+
+    def add_pair(self, name):
+        # Echo content is deliberately not a MAT file: only its paired path is used.
+        (self.echo_dir / name).touch()
+        write_target(self.image_dir / name, np.ones((12, 12)))
+
+    def test_matching_is_sorted_and_paths_are_relative_to_data_root(self):
+        self.add_pair("b.mat")
+        self.add_pair("a.mat")
+        (self.echo_dir / "notes.txt").write_text("not a sample", encoding="utf-8")
+        self.assertEqual(build_pairs(self.echo_dir, self.image_dir, self.root), [
+            {"source": "echo_5_new/a.mat", "target": "image_5_new/a.mat"},
+            {"source": "echo_5_new/b.mat", "target": "image_5_new/b.mat"},
+        ])
+
+    def test_cli_generates_prompts_from_directories_without_input_json(self):
+        self.add_pair("b.mat")
+        self.add_pair("a.mat")
+        output = self.root / "outputs/dataset_pair.json"
+        script = Path(__file__).resolve().parents[1] / "tools/target_statistics.py"
+        result = subprocess.run([
+            sys.executable, str(script), "--data-root", str(self.root),
+            "--output-json", str(output),
+        ], check=True, capture_output=True, text=True)
+        records = json.loads(output.read_text(encoding="utf-8"))
+        self.assertIn("Wrote 2 records", result.stdout)
+        self.assertEqual([row["source"] for row in records], [
+            "echo_5_new/a.mat", "echo_5_new/b.mat",
+        ])
+        self.assertTrue(all(row["prompt"].startswith("Echo to image.") for row in records))
+        self.assertTrue(all(row["image_attributes"]["baseline"] == "target_statistics_v1"
+                            for row in records))
+
+    def test_explicit_directories_and_pilot_limit(self):
+        self.add_pair("a.mat")
+        self.add_pair("b.mat")
+        output = self.root / "pilot.json"
+        generate_dataset(data_root=self.root, output_json=output,
+                         echo_dir=self.echo_dir, image_dir=self.image_dir, limit=1)
+        records = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["target"], "image_5_new/a.mat")
+
+    def test_unmatched_files_on_either_side_are_reported_without_output(self):
+        self.add_pair("a.mat")
+        (self.echo_dir / "echo_only.mat").touch()
+        write_target(self.image_dir / "image_only.mat", np.ones((12, 12)))
+        output = self.root / "failed.json"
+        with self.assertRaisesRegex(ValueError, "missing images=1.*missing echoes=1"):
+            generate_dataset(data_root=self.root, output_json=output)
+        self.assertFalse(output.exists())
+
+    def test_empty_and_missing_directories_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "No matching .mat pairs"):
+            build_pairs(self.echo_dir, self.image_dir, self.root)
+        with self.assertRaisesRegex(ValueError, "directory does not exist"):
+            build_pairs(self.root / "missing", self.image_dir, self.root)
+
+    def test_existing_manifest_cannot_be_combined_with_directory_mode(self):
+        with self.assertRaisesRegex(ValueError, "not both"):
+            generate_dataset(input_json=self.root / "pairs.json", data_root=self.root,
+                             output_json=self.root / "out.json", echo_dir=self.echo_dir)
 
 
 if __name__ == "__main__":
