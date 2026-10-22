@@ -47,7 +47,7 @@ relative power fractions; these match fractions from `A**2` and are not calibrat
 backscatter or physical radiometry. Global positive gain does not change the
 relative attributes or prompt. Raw amplitude quantiles and peak are also retained.
 
-| Attribute | Definition | Initial wording cutoffs |
+| Attribute | Definition | Initial attribute-level cutoffs |
 |---|---|---|
 | Contrast | `(p90(U)-p10(U))/(p90(U)+p10(U))`; zero if denominator is zero | Low `<0.25`, high `>=0.60`, otherwise moderate |
 | Spatial distribution | Split rows/columns into 3 nearly equal groups; sum `P` in each cell and divide by total | Name the largest cell only if its share is `>=0.20` and `>=1.25` times the runner-up; its power per pixel must also exceed every other cell by that ratio |
@@ -65,6 +65,32 @@ All cutoffs are **uncalibrated initial rules**, not established SAR thresholds.
 They are exposed as CLI options and recorded per sample under `rules`.
 Gradient statistics describe local variation, not object classes, texture causes,
 or physical speckle parameters. No directional-structure claims are generated.
+
+## Numerical prompt format
+
+For nonzero images, prompts combine a short spatial description with a fixed-order
+numerical summary: quantile contrast, nine grid power shares in row-major order,
+brightest-pixel power share, and mean local amplitude variation. All summary
+numbers use three decimal places. `image_attributes` retains the unrounded
+statistics and the categorical levels for inspection. The brightest-pixel
+percentage uses the actual selected pixel count, including ceiling effects.
+
+Illustrative values, not a measured sample:
+
+```text
+Echo to image. Relative image power is strongest in the upper-right region.
+Amplitude contrast: 0.437.
+Power distribution on the 3x3 grid, from top-left to bottom-right:
+[0.080, 0.100, 0.220, 0.060, 0.140, 0.120, 0.070, 0.090, 0.120].
+Brightest 1.000% pixel power share: 0.287.
+Local amplitude variation: 0.083.
+```
+
+The JSON prompt is a single line. Rounding can make the displayed grid shares
+sum to slightly above or below one. Numerical summaries preserve differences
+within categorical bins but do not guarantee unique prompts. Zero-amplitude
+images retain the dedicated zero-amplitude prompt. Check the downstream text
+encoder's length limit before using these prompts for model training.
 
 ## Run on the Linux server
 
@@ -124,11 +150,14 @@ generation script, for example `bash run/03_pilot.sh --limit 24` or
 Direct invocation `python tools/target_statistics.py` uses the same full-dataset
 defaults. For an existing manifest, use `--input-json /path/to/pairs.json`.
 
-Input and existing output JSON files are never overwritten. Read/schema failures
+Existing output JSON files are overwritten on successful regeneration, including
+`outputs/dataset_pair.json` and the pilot JSON. An input manifest cannot also be
+the output path. Read/schema failures
 stop the run with the record index and target path; failed samples are not replaced
 or silently dropped. No output JSON is opened until all selected records have
-been processed and serialized. Interruption during the final disk write can
-still leave an incomplete new file; inspect/remove that output before rerunning.
+been processed and serialized, so earlier processing failures preserve existing
+output content. Interruption during the final disk write can still leave an
+incomplete output; rerun generation to replace it.
 Previews already written before a failure remain available for inspection.
 Pair lists and output records are held in memory; MAT images are read one at a time.
 
@@ -137,7 +166,8 @@ Pair lists and output records are held in memory; MAT images are read one at a t
 Synthetic server tests cover isolated/tied scatterers, uniform and zero images,
 gain invariance, local variation, compound complex reading, explicit orientation,
 JSON preservation, preview creation, directory pairing, CLI execution, unmatched
-file reporting, and bad-input failures. `run/02_test.sh` also checks Bash syntax
+file reporting, numerical prompt formatting, output replacement, and preservation
+of previous output on processing failure. `run/02_test.sh` also checks Bash syntax
 for all run scripts. These checks do not establish
 that the cutoffs are suitable for the real dataset or that prompts improve reconstruction.
 

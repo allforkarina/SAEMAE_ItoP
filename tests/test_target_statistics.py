@@ -74,6 +74,33 @@ class AttributeTests(unittest.TestCase):
         self.assertIn("zero amplitude", make_prompt(attrs))
         json.dumps(attrs, allow_nan=False)
 
+    def test_numeric_prompt_contains_three_decimal_statistics_in_grid_order(self):
+        attrs = compute_attributes(np.ones((100, 100)))
+        attrs.update(
+            dominant_region="upper_right", quantile_contrast=0.43749,
+            power_grid_3x3=[[0.08, 0.10, 0.22], [0.06, 0.14, 0.12], [0.07, 0.09, 0.12]],
+            brightest_power_share=0.28749, texture_gradient_mean=0.08349,
+        )
+        prompt = make_prompt(attrs)
+        self.assertIn("upper-right", prompt)
+        self.assertIn("Amplitude contrast: 0.437.", prompt)
+        self.assertIn("[0.080, 0.100, 0.220, 0.060, 0.140, 0.120, 0.070, 0.090, 0.120]", prompt)
+        self.assertIn("Brightest 1.000% pixel power share: 0.287.", prompt)
+        self.assertIn("Local amplitude variation: 0.083.", prompt)
+        self.assertEqual(attrs["quantile_contrast"], 0.43749)
+
+    def test_prompt_reports_actual_brightest_pixel_fraction_after_rounding_count(self):
+        attrs = compute_attributes(np.ones((3, 3)))
+        self.assertIn("Brightest 11.111% pixel power share: 0.111.", make_prompt(attrs))
+
+    def test_same_coarse_categories_can_produce_different_numeric_prompts(self):
+        amplitude = np.tile(np.linspace(0.1, 1, 60), (60, 1))
+        first = compute_attributes(amplitude)
+        second = compute_attributes(amplitude ** 1.1)
+        for key in ("dominant_region", "contrast_level", "concentration_level", "texture_level"):
+            self.assertEqual(first[key], second[key])
+        self.assertNotEqual(make_prompt(first), make_prompt(second))
+
     def test_invalid_images_and_rules_are_rejected(self):
         for amplitude in (
             np.full((6, 6), np.nan), np.full((6, 6), np.inf),
@@ -132,14 +159,30 @@ class DatasetTests(unittest.TestCase):
         self.assertEqual(self.manifest.read_bytes(), original_bytes)
         self.assertTrue((previews / "000000_sample.png").is_file())
 
-    def test_refuses_to_overwrite_input_or_existing_output(self):
+    def test_refuses_to_overwrite_original_input(self):
+        original_bytes = self.manifest.read_bytes()
         with self.assertRaises(ValueError):
             generate_dataset(self.manifest, self.root, self.manifest)
+        self.assertEqual(self.manifest.read_bytes(), original_bytes)
+
+    def test_existing_output_is_overwritten_with_updated_prompt(self):
         output = self.root / "existing.json"
-        output.write_text("existing", encoding="utf-8")
-        with self.assertRaises(FileExistsError):
+        output.write_text(json.dumps(self.records), encoding="utf-8")
+        generate_dataset(self.manifest, self.root, output)
+        result = json.loads(output.read_text(encoding="utf-8"))
+        self.assertIn("Amplitude contrast:", result[0]["prompt"])
+        self.assertEqual(result[0]["source"], self.records[0]["source"])
+        self.assertEqual(result[0]["target"], self.records[0]["target"])
+
+    def test_failed_generation_preserves_existing_output(self):
+        output = self.root / "existing.json"
+        output.write_text("previous output", encoding="utf-8")
+        self.manifest.write_text(json.dumps([
+            self.records[0], {"source": "echo/missing.mat", "target": "missing.mat"},
+        ]), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "Record 1"):
             generate_dataset(self.manifest, self.root, output)
-        self.assertEqual(output.read_text(encoding="utf-8"), "existing")
+        self.assertEqual(output.read_text(encoding="utf-8"), "previous output")
 
     def test_missing_or_invalid_target_stops_without_writing_json(self):
         for target in ("missing.mat", "images/real_only.mat"):

@@ -180,33 +180,25 @@ def compute_attributes(amplitude, rules=None):
 def make_prompt(attributes):
     if attributes["zero_amplitude"]:
         return "Echo to image. The target image has zero amplitude throughout."
-    contrast_text = {
-        "low": "The central amplitude range has low contrast.",
-        "moderate": "The central amplitude range has moderate contrast.",
-        "high": "The central amplitude range has high contrast.",
-    }
     region = attributes["dominant_region"]
     if region == "no_single_region":
         spatial_text = "No single region dominates the image power on a 3-by-3 grid."
     else:
         label = region.replace("_", "-")
         spatial_text = f"Relative image power is strongest in the {label} region."
-    concentration_text = {
-        "low": "Image power is broadly distributed across pixels.",
-        "moderate": "Image power is moderately concentrated in the brightest pixels.",
-        "high": "Image power is highly concentrated in the brightest pixels.",
-    }
-    texture_text = {
-        "low": "Local amplitude variation is weak.",
-        "moderate": "Local amplitude variation is moderate.",
-        "high": "Local amplitude variation is strong.",
-    }
+    grid_text = ", ".join(
+        f"{share:.3f}" for row in attributes["power_grid_3x3"] for share in row
+    )
+    brightest_percent = attributes["brightest_pixel_fraction"] * 100
     return " ".join((
         "Echo to image.",
-        contrast_text[attributes["contrast_level"]],
         spatial_text,
-        concentration_text[attributes["concentration_level"]],
-        texture_text[attributes["texture_level"]],
+        f"Amplitude contrast: {attributes['quantile_contrast']:.3f}.",
+        "Power distribution on the 3x3 grid, from top-left to bottom-right: "
+        f"[{grid_text}].",
+        f"Brightest {brightest_percent:.3f}% pixel power share: "
+        f"{attributes['brightest_power_share']:.3f}.",
+        f"Local amplitude variation: {attributes['texture_gradient_mean']:.3f}.",
     ))
 
 
@@ -291,8 +283,6 @@ def generate_dataset(input_json=None, data_root=DEFAULT_DATA_ROOT,
         raise ValueError("Use either input_json or echo/image directories, not both")
     if input_json is not None and output_json.resolve() == input_json.resolve():
         raise ValueError("Output must differ from the original input JSON")
-    if output_json.exists():
-        raise FileExistsError(f"Refusing to overwrite {output_json}")
     if limit is not None and limit <= 0:
         raise ValueError("limit must be positive")
     if preview_count < 0:
@@ -337,11 +327,11 @@ def generate_dataset(input_json=None, data_root=DEFAULT_DATA_ROOT,
         if (index + 1) % 100 == 0:
             print(f"Processed {index + 1}/{len(selected)}", file=sys.stderr)
 
-    # Serialize before opening the destination, so invalid attributes cannot
-    # produce a partial JSON. Exclusive creation protects existing outputs.
+    # Process and serialize before opening the destination, preserving any
+    # previous output if reading, computation, or serialization fails.
     text = json.dumps(output, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
     output_json.parent.mkdir(parents=True, exist_ok=True)
-    with output_json.open("x", encoding="utf-8") as handle:
+    with output_json.open("w", encoding="utf-8") as handle:
         handle.write(text)
     print(f"Wrote {len(output)} records to {output_json}")
     return len(output)

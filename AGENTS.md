@@ -23,6 +23,8 @@ The server's dedicated SSH key is `/data/dyn/.ssh/id_ed25519_sarmae`. Use it exp
 
 The baseline pairs same-named `.mat` files directly under `/data/dyn/capella/output/dataset_hkk_pfa_512/echo_5_new` and `image_5_new`. It computes prompts from targets and writes project-local `outputs/dataset_pair.json`, retaining data-root-relative source/target paths. Existing manifests remain an optional input.
 
+Prompts combine a spatial description with contrast, nine grid shares, brightest-pixel power share, and local variation formatted to three decimal places. Preserve unrounded `image_attributes`. Existing output JSON may be overwritten after successful processing; never overwrite an input manifest. Reuse the existing `run/` scripts for regeneration.
+
 ## Server Configuration Reference
 
 Read this section whenever configuration or dependency decisions arise. Use this server baseline rather than the local Python environment. Treat README versions as original reproduction settings; target the confirmed server environment unless the user approves a different target. Update this reference when new server output establishes a change.
