@@ -273,16 +273,24 @@ def generate_dataset(input_json=None, data_root=DEFAULT_DATA_ROOT,
                      output_json=DEFAULT_OUTPUT_JSON, rules=None, mat_key="pfa_patch",
                      limit=None, preview_dir=None, preview_count=12, transpose=False,
                      flip_vertical=False, flip_horizontal=False, echo_dir=None,
-                     image_dir=None):
-    """Preserve records and order. Errors stop the run; no placeholder samples."""
+                     image_dir=None, metadata_json=None):
+    """Write aligned prompt and metadata lists. Errors stop the run."""
     rules = rules or Rules()
     rules.validate()
     data_root, output_json = Path(data_root), Path(output_json)
+    metadata_json = (
+        Path(metadata_json) if metadata_json is not None
+        else output_json.with_name("metadata.json")
+    )
     input_json = Path(input_json) if input_json is not None else None
     if input_json is not None and (echo_dir is not None or image_dir is not None):
         raise ValueError("Use either input_json or echo/image directories, not both")
-    if input_json is not None and output_json.resolve() == input_json.resolve():
-        raise ValueError("Output must differ from the original input JSON")
+    if output_json.resolve() == metadata_json.resolve():
+        raise ValueError("Prompt and metadata output paths must differ")
+    if input_json is not None and input_json.resolve() in (
+        output_json.resolve(), metadata_json.resolve(),
+    ):
+        raise ValueError("Outputs must differ from the original input JSON")
     if limit is not None and limit <= 0:
         raise ValueError("limit must be positive")
     if preview_count < 0:
@@ -301,6 +309,7 @@ def generate_dataset(input_json=None, data_root=DEFAULT_DATA_ROOT,
         raise ValueError("Input JSON must contain a nonempty list of data pairs")
     selected = records if limit is None else records[:limit]
     output = []
+    metadata = []
     preview_dir = Path(preview_dir) if preview_dir is not None else None
     if preview_dir is not None:
         preview_dir.mkdir(parents=True, exist_ok=True)
@@ -317,9 +326,9 @@ def generate_dataset(input_json=None, data_root=DEFAULT_DATA_ROOT,
             attributes = compute_attributes(amplitude, rules)
             attributes.update(mat_key=mat_key, orientation=orientation)
             prompt = make_prompt(attributes)
-            result = dict(record)
-            result.update(prompt=prompt, image_attributes=attributes)
-            output.append(result)
+            pair = {"source": record["source"], "target": target}
+            output.append({**pair, "prompt": prompt})
+            metadata.append({**pair, "image_attributes": attributes})
             if preview_dir is not None and index < preview_count:
                 save_preview(amplitude, attributes, prompt, preview_dir / f"{index:06d}_{path.stem}.png")
         except (OSError, KeyError, TypeError, ValueError) as error:
@@ -329,11 +338,16 @@ def generate_dataset(input_json=None, data_root=DEFAULT_DATA_ROOT,
 
     # Process and serialize before opening the destination, preserving any
     # previous output if reading, computation, or serialization fails.
-    text = json.dumps(output, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
-    output_json.parent.mkdir(parents=True, exist_ok=True)
-    with output_json.open("w", encoding="utf-8") as handle:
-        handle.write(text)
+    texts = [
+        json.dumps(records, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+        for records in (output, metadata)
+    ]
+    for path, text in zip((output_json, metadata_json), texts):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            handle.write(text)
     print(f"Wrote {len(output)} records to {output_json}")
+    print(f"Wrote {len(metadata)} metadata records to {metadata_json}")
     return len(output)
 
 
@@ -344,6 +358,8 @@ def main():
     parser.add_argument("--echo-dir", type=Path, help="Default: DATA_ROOT/echo_5_new")
     parser.add_argument("--image-dir", type=Path, help="Default: DATA_ROOT/image_5_new")
     parser.add_argument("--output-json", type=Path, default=DEFAULT_OUTPUT_JSON)
+    parser.add_argument("--metadata-json", type=Path,
+                        help="Default: metadata.json beside the prompt output")
     parser.add_argument("--mat-key", default="pfa_patch")
     parser.add_argument("--limit", type=int, help="Process only the first N records; writes a subset JSON")
     parser.add_argument("--preview-dir", type=Path)

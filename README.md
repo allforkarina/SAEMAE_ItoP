@@ -32,9 +32,10 @@ Wei Cui<sup>1 †</sup>, Jing Zhang<sup>2,4 †</sup>.
 An independent offline tool generates per-sample English prompts and numerical
 attributes from MATLAB 7.3 `pfa_patch` target images. It pairs same-named files in
 `echo_5_new/` and `image_5_new/` and writes `outputs/dataset_pair.json` with
-`source`, `target`, `prompt`, and `image_attributes`. Run scripts are in `run/`.
+`source`, `target`, and `prompt`. Detailed `image_attributes` are stored separately
+with matching source/target paths in `outputs/metadata.json`. Run scripts are in `run/`.
 Prompts include numerical statistics to three decimal places; rerunning replaces
-the output JSON. This baseline uses image statistics
+both output JSON files. This baseline uses image statistics
 and does not use SARMAE features. See [the baseline guide](docs/target_statistics_baseline.md)
 for attribute definitions, preview generation, and Linux-server validation commands.
 

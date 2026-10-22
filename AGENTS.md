@@ -21,9 +21,9 @@ The current local branch is `main`; `origin` points to the user's confirmed GitH
 
 The server's dedicated SSH key is `/data/dyn/.ssh/id_ed25519_sarmae`. Use it explicitly for cloning and configure `core.sshCommand` locally in the server checkout for subsequent Git operations; do not change global SSH settings or commit key material.
 
-The baseline pairs same-named `.mat` files directly under `/data/dyn/capella/output/dataset_hkk_pfa_512/echo_5_new` and `image_5_new`. It computes prompts from targets and writes project-local `outputs/dataset_pair.json`, retaining data-root-relative source/target paths. Existing manifests remain an optional input.
+The baseline pairs same-named `.mat` files directly under `/data/dyn/capella/output/dataset_hkk_pfa_512/echo_5_new` and `image_5_new`. It writes aligned project-local JSON lists: `outputs/dataset_pair.json` contains only `source`, `target`, `prompt`; `outputs/metadata.json` contains only `source`, `target`, `image_attributes`. Retain data-root-relative paths and identical pair order. Existing manifests remain an optional input; their additional fields are not copied to outputs.
 
-Prompts combine a spatial description with contrast, nine grid shares, brightest-pixel power share, and local variation formatted to three decimal places. Preserve unrounded `image_attributes`. Existing output JSON may be overwritten after successful processing; never overwrite an input manifest. Reuse the existing `run/` scripts for regeneration.
+Prompts combine a spatial description with contrast, nine grid shares, brightest-pixel power share, and local variation formatted to three decimal places. Preserve unrounded `image_attributes` in metadata only. Both output JSON files may be overwritten after successful processing; never overwrite an input manifest. Reuse existing `run/` scripts; pilot files are `dataset_pair_pilot.json` and `metadata_pilot.json` to keep them separate from full outputs.
 
 ## Server Configuration Reference
 

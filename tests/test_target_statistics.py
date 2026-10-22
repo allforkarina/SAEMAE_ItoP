@@ -151,10 +151,14 @@ class DatasetTests(unittest.TestCase):
         previews = self.root / "previews"
         self.assertEqual(generate_dataset(self.manifest, self.root, output, preview_dir=previews), 1)
         result = json.loads(output.read_text(encoding="utf-8"))[0]
-        for key in ("source", "target", "split"):
+        metadata = json.loads((self.root / "metadata.json").read_text(encoding="utf-8"))[0]
+        self.assertEqual(set(result), {"source", "target", "prompt"})
+        self.assertEqual(set(metadata), {"source", "target", "image_attributes"})
+        for key in ("source", "target"):
             self.assertEqual(result[key], self.records[0][key])
-        self.assertEqual(result["image_attributes"]["dominant_region"], "upper_right")
-        self.assertFalse(result["image_attributes"]["uses_sarmae"])
+            self.assertEqual(metadata[key], result[key])
+        self.assertEqual(metadata["image_attributes"]["dominant_region"], "upper_right")
+        self.assertFalse(metadata["image_attributes"]["uses_sarmae"])
         self.assertTrue(result["prompt"].startswith("Echo to image. "))
         self.assertEqual(self.manifest.read_bytes(), original_bytes)
         self.assertTrue((previews / "000000_sample.png").is_file())
@@ -165,24 +169,42 @@ class DatasetTests(unittest.TestCase):
             generate_dataset(self.manifest, self.root, self.manifest)
         self.assertEqual(self.manifest.read_bytes(), original_bytes)
 
+    def test_metadata_cannot_overwrite_input_or_prompt_output(self):
+        output = self.root / "generated.json"
+        for metadata in (self.manifest, output):
+            with self.subTest(metadata=metadata):
+                with self.assertRaises(ValueError):
+                    generate_dataset(self.manifest, self.root, output, metadata_json=metadata)
+                self.assertFalse(output.exists())
+
     def test_existing_output_is_overwritten_with_updated_prompt(self):
         output = self.root / "existing.json"
+        metadata = self.root / "metadata.json"
         output.write_text(json.dumps(self.records), encoding="utf-8")
+        metadata.write_text("previous metadata", encoding="utf-8")
         generate_dataset(self.manifest, self.root, output)
         result = json.loads(output.read_text(encoding="utf-8"))
         self.assertIn("Amplitude contrast:", result[0]["prompt"])
         self.assertEqual(result[0]["source"], self.records[0]["source"])
         self.assertEqual(result[0]["target"], self.records[0]["target"])
+        self.assertNotIn("image_attributes", result[0])
+        details = json.loads(metadata.read_text(encoding="utf-8"))
+        self.assertEqual(details[0]["source"], result[0]["source"])
+        self.assertIn("image_attributes", details[0])
+        self.assertNotIn("prompt", details[0])
 
     def test_failed_generation_preserves_existing_output(self):
         output = self.root / "existing.json"
+        metadata = self.root / "metadata.json"
         output.write_text("previous output", encoding="utf-8")
+        metadata.write_text("previous metadata", encoding="utf-8")
         self.manifest.write_text(json.dumps([
             self.records[0], {"source": "echo/missing.mat", "target": "missing.mat"},
         ]), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "Record 1"):
             generate_dataset(self.manifest, self.root, output)
         self.assertEqual(output.read_text(encoding="utf-8"), "previous output")
+        self.assertEqual(metadata.read_text(encoding="utf-8"), "previous metadata")
 
     def test_missing_or_invalid_target_stops_without_writing_json(self):
         for target in ("missing.mat", "images/real_only.mat"):
@@ -196,14 +218,18 @@ class DatasetTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Record 1"):
                     generate_dataset(self.manifest, self.root, output)
                 self.assertFalse(output.exists())
+                self.assertFalse((self.root / "metadata.json").exists())
 
     def test_limit_outputs_only_selected_records_in_original_order(self):
-        records = [dict(self.records[0], sample_id=i) for i in range(3)]
+        records = [dict(self.records[0], source=f"echo/sample_{i}.mat") for i in range(3)]
         self.manifest.write_text(json.dumps(records), encoding="utf-8")
         output = self.root / "subset.json"
         generate_dataset(self.manifest, self.root, output, limit=2)
         results = json.loads(output.read_text(encoding="utf-8"))
-        self.assertEqual([row["sample_id"] for row in results], [0, 1])
+        expected = ["echo/sample_0.mat", "echo/sample_1.mat"]
+        self.assertEqual([row["source"] for row in results], expected)
+        metadata = json.loads((self.root / "metadata.json").read_text(encoding="utf-8"))
+        self.assertEqual([row["source"] for row in metadata], expected)
 
 
 class DirectoryPairTests(unittest.TestCase):
@@ -240,23 +266,33 @@ class DirectoryPairTests(unittest.TestCase):
             "--output-json", str(output),
         ], check=True, capture_output=True, text=True)
         records = json.loads(output.read_text(encoding="utf-8"))
+        metadata = json.loads((output.parent / "metadata.json").read_text(encoding="utf-8"))
         self.assertIn("Wrote 2 records", result.stdout)
         self.assertEqual([row["source"] for row in records], [
             "echo_5_new/a.mat", "echo_5_new/b.mat",
         ])
         self.assertTrue(all(row["prompt"].startswith("Echo to image.") for row in records))
+        self.assertTrue(all(set(row) == {"source", "target", "prompt"} for row in records))
+        self.assertEqual([(row["source"], row["target"]) for row in metadata],
+                         [(row["source"], row["target"]) for row in records])
         self.assertTrue(all(row["image_attributes"]["baseline"] == "target_statistics_v1"
-                            for row in records))
+                            for row in metadata))
 
     def test_explicit_directories_and_pilot_limit(self):
         self.add_pair("a.mat")
         self.add_pair("b.mat")
         output = self.root / "pilot.json"
+        metadata = self.root / "audit/metadata_pilot.json"
         generate_dataset(data_root=self.root, output_json=output,
-                         echo_dir=self.echo_dir, image_dir=self.image_dir, limit=1)
+                         echo_dir=self.echo_dir, image_dir=self.image_dir, limit=1,
+                         metadata_json=metadata)
         records = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["target"], "image_5_new/a.mat")
+        details = json.loads(metadata.read_text(encoding="utf-8"))
+        self.assertEqual(len(details), 1)
+        self.assertEqual(details[0]["target"], records[0]["target"])
+        self.assertFalse((self.root / "metadata.json").exists())
 
     def test_unmatched_files_on_either_side_are_reported_without_output(self):
         self.add_pair("a.mat")
@@ -266,6 +302,7 @@ class DirectoryPairTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing images=1.*missing echoes=1"):
             generate_dataset(data_root=self.root, output_json=output)
         self.assertFalse(output.exists())
+        self.assertFalse((self.root / "metadata.json").exists())
 
     def test_empty_and_missing_directories_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "No matching .mat pairs"):

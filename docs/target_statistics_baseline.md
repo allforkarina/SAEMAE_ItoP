@@ -3,8 +3,13 @@
 ## Scope and data flow
 
 This independent CPU tool pairs echo and image files, loads each **target** MATLAB
-7.3 image, computes descriptive statistics, and writes one `prompt` and
-`image_attributes` entry per pair to the project file `outputs/dataset_pair.json`.
+7.3 image, computes descriptive statistics, and writes aligned JSON lists:
+
+- `outputs/dataset_pair.json`: each record contains only `source`, `target`, and `prompt`.
+- `outputs/metadata.json`: each record contains only `source`, `target`, and `image_attributes`.
+
+Both files contain the same pairs in the same order. Join by `source` and `target`
+when inspecting metadata alongside prompts.
 It does not load echo contents, SARMAE, model weights, or an LLM.
 These are target-derived training annotations; generation from echo at inference
 is outside this baseline. Downstream consumption of JSON prompts is not yet verified.
@@ -28,7 +33,8 @@ data root, for example `echo_5_new/x_+00550_y_-00250.mat` and
 Override them with `--data-root`, `--echo-dir`, and `--image-dir` if needed.
 
 Existing manifests remain supported through `--input-json`; that mode preserves
-all other fields and the original record order. It cannot be combined with
+source/target values and the original record order. Additional input fields are
+not copied into the two fixed output schemas. It cannot be combined with
 `--echo-dir` or `--image-dir`. No input JSON is needed for the default workflow.
 
 ## Coordinate convention
@@ -38,7 +44,7 @@ zero at the left. These labels are **image-array positions**, not geographic
 directions. Orientation relative to the unavailable downstream loader remains
 unverified. Optional transforms run in this order: `--transpose`,
 `--flip-vertical`, `--flip-horizontal`. All transforms and the stored shape are
-recorded in `image_attributes.orientation`; previews use the same orientation.
+recorded in metadata's `image_attributes.orientation`; previews use the same orientation.
 
 ## Attributes and initial rules
 
@@ -71,7 +77,7 @@ or physical speckle parameters. No directional-structure claims are generated.
 For nonzero images, prompts combine a short spatial description with a fixed-order
 numerical summary: quantile contrast, nine grid power shares in row-major order,
 brightest-pixel power share, and mean local amplitude variation. All summary
-numbers use three decimal places. `image_attributes` retains the unrounded
+numbers use three decimal places. `image_attributes` in the separate metadata file retains the unrounded
 statistics and the categorical levels for inspection. The brightest-pixel
 percentage uses the actual selected pixel count, including ceiling effects.
 
@@ -132,8 +138,8 @@ Choose diverse records for subsequent review if these are adjacent patches.
 bash run/03_pilot.sh
 ```
 
-The pilot writes `outputs/dataset_pair_pilot.json` and PNGs under
-`outputs/previews/`. It contains only the selected pairs. Each PNG shows relative
+The pilot writes `outputs/dataset_pair_pilot.json`, `outputs/metadata_pilot.json`,
+and PNGs under `outputs/previews/`. Both JSON lists contain only the selected pairs. Each PNG shows relative
 amplitude in `[-60,0]` dB, grid-cell power shares, and the generated prompt.
 Statistics use linear amplitude/power, not the display transform.
 
@@ -143,21 +149,25 @@ Statistics use linear amplitude/power, not the display transform.
 bash run/04_generate_dataset.sh
 ```
 
-This writes all pairs to **`outputs/dataset_pair.json`**. The project `outputs/`
+This writes all pairs to **`outputs/dataset_pair.json`** and **`outputs/metadata.json`**. The project `outputs/`
 directory is ignored by Git. Additional CLI options can be appended to either
 generation script, for example `bash run/03_pilot.sh --limit 24` or
 `bash run/04_generate_dataset.sh --output-json /tmp/dataset_pair_v2.json`.
 Direct invocation `python tools/target_statistics.py` uses the same full-dataset
 defaults. For an existing manifest, use `--input-json /path/to/pairs.json`.
+By default, metadata is written to `metadata.json` beside `--output-json`.
+Use `--metadata-json` to override its location. The pilot script explicitly
+selects `metadata_pilot.json`; pass `--metadata-json` to override that path too.
 
 Existing output JSON files are overwritten on successful regeneration, including
-`outputs/dataset_pair.json` and the pilot JSON. An input manifest cannot also be
-the output path. Read/schema failures
+both prompt and metadata files. The two output paths must be distinct, and neither
+may equal the input manifest path. Read/schema failures
 stop the run with the record index and target path; failed samples are not replaced
 or silently dropped. No output JSON is opened until all selected records have
-been processed and serialized, so earlier processing failures preserve existing
-output content. Interruption during the final disk write can still leave an
-incomplete output; rerun generation to replace it.
+been processed and both lists serialized, so earlier processing failures preserve
+both existing outputs. The files are written sequentially; interruption or a disk
+write failure can leave the files incomplete or from different runs. Rerun
+generation to refresh both outputs together.
 Previews already written before a failure remain available for inspection.
 Pair lists and output records are held in memory; MAT images are read one at a time.
 
@@ -166,7 +176,8 @@ Pair lists and output records are held in memory; MAT images are read one at a t
 Synthetic server tests cover isolated/tied scatterers, uniform and zero images,
 gain invariance, local variation, compound complex reading, explicit orientation,
 JSON preservation, preview creation, directory pairing, CLI execution, unmatched
-file reporting, numerical prompt formatting, output replacement, and preservation
+file reporting, numerical prompt formatting, strict separate schemas, matching
+prompt/metadata order, output replacement, and preservation
 of previous output on processing failure. `run/02_test.sh` also checks Bash syntax
 for all run scripts. These checks do not establish
 that the cutoffs are suitable for the real dataset or that prompts improve reconstruction.
