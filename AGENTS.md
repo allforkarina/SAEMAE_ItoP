@@ -7,6 +7,7 @@
 - `SARMAE_Fintune/Detection/` and `SARMAE_Fintune/Segmentation/`: OpenMMLab backbone adaptations, datasets, and task configurations. These are integration files, not complete framework checkouts.
 - `Figs/`: README illustrations.
 - `tools/target_statistics.py`: independent MATLAB 7.3 target-statistics prompt baseline; see `docs/target_statistics_baseline.md` for formulas and server commands.
+- `tools/cphd_parameters.py`: standard-library CPHD 1.0/1.1 XML parameter extraction and product-context rendering; `tests/test_cphd_parameters.py` covers synthetic CPHD integration.
 - `tests/test_target_statistics.py`: synthetic baseline tests using standard-library `unittest`; run on the server only.
 - `run/`: Bash entry points for dependency setup, tests, pilot previews, and full JSON generation. `outputs/` holds generated artifacts and is ignored by Git.
 
@@ -24,6 +25,8 @@ The server's dedicated SSH key is `/data/dyn/.ssh/id_ed25519_sarmae`. Use it exp
 The baseline pairs same-named `.mat` files directly under `/data/dyn/capella/output/dataset_hkk_pfa_512/echo_5_new` and `image_5_new`. It writes aligned project-local JSON lists: `outputs/dataset_pair.json` contains only `source`, `target`, `prompt`; `outputs/metadata.json` contains only `source`, `target`, `image_attributes`. Retain data-root-relative paths and identical pair order. Existing manifests remain an optional input; their additional fields are not copied to outputs.
 
 Prompts combine a spatial description with contrast, nine grid shares, brightest-pixel power share, and local variation formatted to three decimal places. Preserve unrounded `image_attributes` in metadata only. Both output JSON files may be overwritten after successful processing; never overwrite an input manifest. Reuse existing `run/` scripts; pilot files are `dataset_pair_pilot.json` and `metadata_pilot.json` to keep them separate from full outputs.
+
+With `--cphd-file`, append one acquisition paragraph to every patch prompt and save structured parameters to `outputs/cphd_parameters.json`, without a separate prompt field. One supplied CPHD must correspond to all pairs in that run; its actual server path remains unconfirmed. Require `--cphd-channel` for multiple channels. Preserve Hz/seconds/meters/degrees in parameter field names; distinguish saved bandwidth from transmitted RF bandwidth and product reference geometry from patch geometry. Do not infer PRF or image resolution. No new dependencies are needed. Reuse the pilot script with `--cphd-parameters-json outputs/cphd_parameters_pilot.json`; full generation defaults to `cphd_parameters.json`. All output paths must differ from each other and original inputs. Validation stays on the server.
 
 ## Server Configuration Reference
 

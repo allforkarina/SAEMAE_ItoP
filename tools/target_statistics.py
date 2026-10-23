@@ -11,6 +11,11 @@ import h5py
 import numpy as np
 from PIL import Image, ImageDraw
 
+if __package__:
+    from .cphd_parameters import extract_parameters, make_product_prompt
+else:
+    from cphd_parameters import extract_parameters, make_product_prompt
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_ROOT = Path("/data/dyn/capella/output/dataset_hkk_pfa_512")
@@ -273,7 +278,8 @@ def generate_dataset(input_json=None, data_root=DEFAULT_DATA_ROOT,
                      output_json=DEFAULT_OUTPUT_JSON, rules=None, mat_key="pfa_patch",
                      limit=None, preview_dir=None, preview_count=12, transpose=False,
                      flip_vertical=False, flip_horizontal=False, echo_dir=None,
-                     image_dir=None, metadata_json=None):
+                     image_dir=None, metadata_json=None, cphd_file=None,
+                     cphd_channel=None, cphd_parameters_json=None):
     """Write aligned prompt and metadata lists. Errors stop the run."""
     rules = rules or Rules()
     rules.validate()
@@ -285,16 +291,28 @@ def generate_dataset(input_json=None, data_root=DEFAULT_DATA_ROOT,
     input_json = Path(input_json) if input_json is not None else None
     if input_json is not None and (echo_dir is not None or image_dir is not None):
         raise ValueError("Use either input_json or echo/image directories, not both")
-    if output_json.resolve() == metadata_json.resolve():
-        raise ValueError("Prompt and metadata output paths must differ")
-    if input_json is not None and input_json.resolve() in (
-        output_json.resolve(), metadata_json.resolve(),
-    ):
-        raise ValueError("Outputs must differ from the original input JSON")
+    if cphd_file is None and (cphd_channel is not None or cphd_parameters_json is not None):
+        raise ValueError("CPHD options require --cphd-file")
+    destinations = [output_json, metadata_json]
+    if cphd_file is not None:
+        cphd_file = Path(cphd_file)
+        cphd_parameters_json = (
+            Path(cphd_parameters_json) if cphd_parameters_json is not None
+            else output_json.with_name("cphd_parameters.json")
+        )
+        destinations.append(cphd_parameters_json)
+    resolved = [path.resolve() for path in destinations]
+    if len(set(resolved)) != len(resolved):
+        raise ValueError("Prompt, metadata, and CPHD parameter output paths must differ")
+    for original in (input_json, cphd_file):
+        if original is not None and original.resolve() in resolved:
+            raise ValueError("Outputs must differ from the original input JSON and CPHD file")
     if limit is not None and limit <= 0:
         raise ValueError("limit must be positive")
     if preview_count < 0:
         raise ValueError("preview_count must be nonnegative")
+    parameters = extract_parameters(cphd_file, cphd_channel) if cphd_file is not None else None
+    product_prompt = make_product_prompt(parameters) if parameters is not None else None
     if input_json is not None:
         with input_json.open(encoding="utf-8") as handle:
             records = json.load(handle)
@@ -326,6 +344,8 @@ def generate_dataset(input_json=None, data_root=DEFAULT_DATA_ROOT,
             attributes = compute_attributes(amplitude, rules)
             attributes.update(mat_key=mat_key, orientation=orientation)
             prompt = make_prompt(attributes)
+            if product_prompt is not None:
+                prompt += " " + product_prompt
             pair = {"source": record["source"], "target": target}
             output.append({**pair, "prompt": prompt})
             metadata.append({**pair, "image_attributes": attributes})
@@ -338,16 +358,21 @@ def generate_dataset(input_json=None, data_root=DEFAULT_DATA_ROOT,
 
     # Process and serialize before opening the destination, preserving any
     # previous output if reading, computation, or serialization fails.
+    payloads = [output, metadata]
+    if parameters is not None:
+        payloads.append(parameters)
     texts = [
         json.dumps(records, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
-        for records in (output, metadata)
+        for records in payloads
     ]
-    for path, text in zip((output_json, metadata_json), texts):
+    for path, text in zip(destinations, texts):
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as handle:
             handle.write(text)
     print(f"Wrote {len(output)} records to {output_json}")
     print(f"Wrote {len(metadata)} metadata records to {metadata_json}")
+    if parameters is not None:
+        print(f"Wrote CPHD parameters to {cphd_parameters_json}")
     return len(output)
 
 
@@ -360,6 +385,11 @@ def main():
     parser.add_argument("--output-json", type=Path, default=DEFAULT_OUTPUT_JSON)
     parser.add_argument("--metadata-json", type=Path,
                         help="Default: metadata.json beside the prompt output")
+    parser.add_argument("--cphd-file", type=Path,
+                        help="Original CPHD 1.0/1.1 product corresponding to ALL pairs in this run")
+    parser.add_argument("--cphd-channel", help="Channel identifier; required for multi-channel CPHD")
+    parser.add_argument("--cphd-parameters-json", type=Path,
+                        help="Default: cphd_parameters.json beside the prompt output; requires --cphd-file")
     parser.add_argument("--mat-key", default="pfa_patch")
     parser.add_argument("--limit", type=int, help="Process only the first N records; writes a subset JSON")
     parser.add_argument("--preview-dir", type=Path)

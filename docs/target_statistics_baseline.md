@@ -7,6 +7,8 @@ This independent CPU tool pairs echo and image files, loads each **target** MATL
 
 - `outputs/dataset_pair.json`: each record contains only `source`, `target`, and `prompt`.
 - `outputs/metadata.json`: each record contains only `source`, `target`, and `image_attributes`.
+- With `--cphd-file`, `outputs/cphd_parameters.json`: one formatted parameter
+  object for the original product, without a separate prompt field.
 
 Both files contain the same pairs in the same order. Join by `source` and `target`
 when inspecting metadata alongside prompts.
@@ -98,6 +100,65 @@ within categorical bins but do not guarantee unique prompts. Zero-amplitude
 images retain the dedicated zero-amplitude prompt. Check the downstream text
 encoder's length limit before using these prompts for model training.
 
+## CPHD product context
+
+Pass `--cphd-file /absolute/path/product.cphd` to append one English acquisition
+paragraph to **every** existing patch prompt. This option declares that every
+pair in this run comes from that product; the tool cannot establish this mapping
+from patch filenames. For multiple products, run separately on their corresponding
+pairs. Without this option, the original image-statistics-only workflow remains available.
+
+The reader supports CPHD 1.0.0, 1.0.1, and 1.1.0. It seeks to the header-declared
+XML block, using Python's standard library; signal and PVP arrays are not loaded.
+No new dependency is needed. CPHD 0.3 is not supported. A multi-channel product
+requires `--cphd-channel IDENTIFIER`; a single channel is selected automatically.
+
+The parameter object has `collection`, `channel`, `reference_geometry`,
+`transmit_waveforms`, and `receivers` sections plus source/version/scope provenance.
+Units are encoded in field names. Missing optional values are `null` (or empty
+waveform/receiver lists) and omitted from the generated text.
+
+| Normalized field | CPHD XML source | Unit / meaning |
+|---|---|---|
+| `collection.collector_name`, `radar_mode`, `collect_type` | `CollectionID` | Reported collector, radar mode, collection type |
+| `collection.collection_start_utc`, `tx_time_min_s`, `tx_time_max_s` | `Global/Timeline` | UTC start; transmit time bounds relative to start, in seconds; retained in parameter JSON |
+| `collection.signal_domain` | `Global/DomainType` | FX or TOA |
+| `channel.saved_center_frequency_hz`, `saved_bandwidth_hz` | Selected `Channel/Parameters/FxC`, `FxBW` | Saved-band center and span in Hz, summarized over channel vectors |
+| `channel.tx_polarization`, `receive_polarization` | Selected channel `Polarization/TxPol`, `RcvPol` | Transmit and receive polarization separately |
+| `channel.num_vectors`, `num_samples_per_vector` | Matching `Data/Channel` | Full product channel dimensions, not cropped patch dimensions |
+| `reference_geometry.*_deg`, `slant_range_m`, `side_of_track` | `ReferenceGeometry/Monostatic` | Product reference-channel geometry, not a per-patch measurement |
+| `transmit_waveforms[].pulse_length_s`, `rf_bandwidth_hz`, `center_frequency_hz` | Channel-linked `TxRcv/TxWFParameters` | Seconds and Hz; transmitted RF bandwidth is distinct from saved bandwidth |
+| `receivers[].sample_rate_hz`, `window_length_s`, `if_filter_bandwidth_hz` | Channel-linked `TxRcv/RcvParameters` | Declared receiver settings in Hz and seconds |
+
+Frequency/bandwidth text uses GHz/MHz, pulse length uses microseconds, and range
+uses km; JSON retains the original numeric precision in the units above. Product
+IDs, file paths, and collection timestamps are kept in parameters, not appended
+as sample descriptions. Only monostatic reference geometry is summarized in this
+version. PRF, output image resolution, and patch-specific geometry are not inferred.
+Required channel fields, explicit channel links, namespace/version, and XML byte
+bounds are checked; this is not a complete CPHD schema validator.
+
+Field definitions follow NGA's [CPHD schema](https://github.com/ngageoint/sarpy/blob/master/sarpy/io/phase_history/cphd_schema/CPHD_schema_V1.0.1_2018_05_21.xsd)
+and [channel definitions](https://github.com/ngageoint/sarpy/blob/master/sarpy/io/phase_history/cphd1_elements/Channel.py).
+
+Reuse the existing scripts on the server, replacing the placeholder with the
+actual original CPHD path corresponding to `echo_5_new`:
+
+```bash
+cphd_file='/replace/with/actual/product.cphd'
+bash run/03_pilot.sh --cphd-file "$cphd_file" \
+  --cphd-parameters-json outputs/cphd_parameters_pilot.json
+# After reviewing the pilot and product parameters:
+bash run/04_generate_dataset.sh --cphd-file "$cphd_file"
+```
+
+The pilot parameter path is explicit to preserve full-run parameters. Add
+`--cphd-channel IDENTIFIER` to both commands if needed. Full generation writes
+`dataset_pair.json`, `metadata.json`, and `cphd_parameters.json` under `outputs/`.
+All three may be overwritten after successful processing. CPHD context is
+concatenated into `prompt`, including for zero-amplitude images; it is not stored
+as an additional per-pair field or a separate product prompt.
+
 ## Run on the Linux server
 
 Run these commands from the server repository checkout, not the local Windows machine.
@@ -160,14 +221,14 @@ Use `--metadata-json` to override its location. The pilot script explicitly
 selects `metadata_pilot.json`; pass `--metadata-json` to override that path too.
 
 Existing output JSON files are overwritten on successful regeneration, including
-both prompt and metadata files. The two output paths must be distinct, and neither
-may equal the input manifest path. Read/schema failures
+prompt, metadata, and any requested CPHD parameter file. All output paths must be
+distinct and must differ from the input manifest and original CPHD paths. Read/schema failures
 stop the run with the record index and target path; failed samples are not replaced
 or silently dropped. No output JSON is opened until all selected records have
-been processed and both lists serialized, so earlier processing failures preserve
-both existing outputs. The files are written sequentially; interruption or a disk
+been processed and all payloads serialized, so earlier processing failures preserve
+all existing outputs. The files are written sequentially; interruption or a disk
 write failure can leave the files incomplete or from different runs. Rerun
-generation to refresh both outputs together.
+generation to refresh all outputs together.
 Previews already written before a failure remain available for inspection.
 Pair lists and output records are held in memory; MAT images are read one at a time.
 
@@ -181,6 +242,13 @@ prompt/metadata order, output replacement, and preservation
 of previous output on processing failure. `run/02_test.sh` also checks Bash syntax
 for all run scripts. These checks do not establish
 that the cutoffs are suitable for the real dataset or that prompts improve reconstruction.
+
+CPHD tests additionally cover byte-offset XML reading, 1.0.1/1.1.0 namespaces,
+unit conversion, selected-channel waveform/receiver links, explicit multi-channel
+selection, optional-field omission, invalid metadata, three output schemas, and
+preservation of previous outputs on CPHD errors. All checks remain server-only.
+Compare pilot parameters with the original product metadata and confirm that all
+pairs belong to the supplied product before full generation.
 
 For the pilot, check count/order, unchanged source/target values, plausible grid
 shares summing to one for nonzero images, and agreement between each prompt and
