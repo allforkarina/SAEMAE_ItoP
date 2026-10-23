@@ -102,11 +102,20 @@ encoder's length limit before using these prompts for model training.
 
 ## CPHD product context
 
-Pass `--cphd-file /absolute/path/product.cphd` to append one English acquisition
-paragraph to **every** existing patch prompt. This option declares that every
-pair in this run comes from that product; the tool cannot establish this mapping
-from patch filenames. For multiple products, run separately on their corresponding
-pairs. Without this option, the original image-statistics-only workflow remains available.
+The existing pilot and full-generation Bash scripts now contain this fixed,
+user-selected CPHD path; no CPHD argument is needed when invoking them:
+
+```text
+/data/dyn/capella/data/CAPELLA_C02_SP_CPHD_HH_20201201165018_20201201165040.cphd
+```
+
+This version reads only that product and appends its English acquisition
+paragraph to **every** existing patch prompt as shared product context, as
+requested. Other CPHD products are not read or compared; matching parameters
+across products and the patch-to-product mapping have not been verified. For
+product-specific annotations later, run each product on its corresponding pairs.
+The Python CLI still accepts `--cphd-file /absolute/path/product.cphd`; without
+it, direct Python invocation retains the image-statistics-only workflow.
 
 The reader supports CPHD 1.0.0, 1.0.1, and 1.1.0. It seeks to the header-declared
 XML block, using Python's standard library; signal and PVP arrays are not loaded.
@@ -141,18 +150,16 @@ bounds are checked; this is not a complete CPHD schema validator.
 Field definitions follow NGA's [CPHD schema](https://github.com/ngageoint/sarpy/blob/master/sarpy/io/phase_history/cphd_schema/CPHD_schema_V1.0.1_2018_05_21.xsd)
 and [channel definitions](https://github.com/ngageoint/sarpy/blob/master/sarpy/io/phase_history/cphd1_elements/Channel.py).
 
-Reuse the existing scripts on the server, replacing the placeholder with the
-actual original CPHD path corresponding to `echo_5_new`:
+Run the existing scripts on the server:
 
 ```bash
-cphd_file='/replace/with/actual/product.cphd'
-bash run/03_pilot.sh --cphd-file "$cphd_file" \
-  --cphd-parameters-json outputs/cphd_parameters_pilot.json
+bash run/03_pilot.sh
 # After reviewing the pilot and product parameters:
-bash run/04_generate_dataset.sh --cphd-file "$cphd_file"
+bash run/04_generate_dataset.sh
 ```
 
-The pilot parameter path is explicit to preserve full-run parameters. Add
+Both scripts fix their parameter output paths under the project root; the pilot
+uses `outputs/cphd_parameters_pilot.json` to preserve full-run parameters. Add
 `--cphd-channel IDENTIFIER` to both commands if needed. Full generation writes
 `dataset_pair.json`, `metadata.json`, and `cphd_parameters.json` under `outputs/`.
 All three may be overwritten after successful processing. CPHD context is
@@ -200,6 +207,7 @@ bash run/03_pilot.sh
 ```
 
 The pilot writes `outputs/dataset_pair_pilot.json`, `outputs/metadata_pilot.json`,
+`outputs/cphd_parameters_pilot.json`,
 and PNGs under `outputs/previews/`. Both JSON lists contain only the selected pairs. Each PNG shows relative
 amplitude in `[-60,0]` dB, grid-cell power shares, and the generated prompt.
 Statistics use linear amplitude/power, not the display transform.
@@ -210,7 +218,8 @@ Statistics use linear amplitude/power, not the display transform.
 bash run/04_generate_dataset.sh
 ```
 
-This writes all pairs to **`outputs/dataset_pair.json`** and **`outputs/metadata.json`**. The project `outputs/`
+This writes all pairs to **`outputs/dataset_pair.json`** and **`outputs/metadata.json`**,
+and shared product parameters to **`outputs/cphd_parameters.json`**. The project `outputs/`
 directory is ignored by Git. Additional CLI options can be appended to either
 generation script, for example `bash run/03_pilot.sh --limit 24` or
 `bash run/04_generate_dataset.sh --output-json /tmp/dataset_pair_v2.json`.
@@ -247,8 +256,8 @@ CPHD tests additionally cover byte-offset XML reading, 1.0.1/1.1.0 namespaces,
 unit conversion, selected-channel waveform/receiver links, explicit multi-channel
 selection, optional-field omission, invalid metadata, three output schemas, and
 preservation of previous outputs on CPHD errors. All checks remain server-only.
-Compare pilot parameters with the original product metadata and confirm that all
-pairs belong to the supplied product before full generation.
+Compare pilot parameters with the selected original product metadata. This
+shared-product version does not establish parameters for the other CPHD files.
 
 For the pilot, check count/order, unchanged source/target values, plausible grid
 shares summing to one for nonzero images, and agreement between each prompt and

@@ -36,11 +36,12 @@ attributes from MATLAB 7.3 `pfa_patch` target images. It pairs same-named files 
 with matching source/target paths in `outputs/metadata.json`. Run scripts are in `run/`.
 Prompts include numerical statistics to three decimal places; rerunning replaces
 both output JSON files. This baseline uses image statistics
-and does not use SARMAE features. Add `--cphd-file /path/to/product.cphd` to
-append the corresponding CPHD acquisition parameters to every patch prompt and
-save structured parameters in `outputs/cphd_parameters.json`; no new dependency
-or run script is required. The supplied product must correspond to all pairs
-in that run. See [the baseline guide](docs/target_statistics_baseline.md)
+and does not use SARMAE features. The pilot and full-generation scripts contain
+the user-selected CPHD path and append its acquisition parameters to every patch
+prompt without extra command-line arguments. Structured parameters are saved in
+`outputs/cphd_parameters.json` (`cphd_parameters_pilot.json` for the pilot).
+This version uses one selected product as shared context; parameters from the
+other products have not been compared. See [the baseline guide](docs/target_statistics_baseline.md)
 for attribute definitions, preview generation, and Linux-server validation commands.
 
 ## 🔥 Update
